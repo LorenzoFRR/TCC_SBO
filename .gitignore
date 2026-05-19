@@ -1,0 +1,30 @@
+# Documentação interna / Claude
+CLAUDE.md
+BACKLOG.md
+TEMPLATES.md
+NOTAS/
+.claude/
+
+# MLflow
+mlruns/
+
+# Referências (PDFs, copyright)
+REFERENCIAS/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Dados grandes (opcional — remover se quiser versionar)
+*.xlsx
+*.npy

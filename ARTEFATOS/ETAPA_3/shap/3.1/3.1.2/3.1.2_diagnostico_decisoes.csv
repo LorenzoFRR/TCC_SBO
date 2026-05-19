@@ -1,0 +1,9 @@
+decisao,descricao,status,evidencia
+D-E3-05,instabilidade de ranking próximo do corte,resolvida,0 célula(s) anômala(s) no heatmap (S_6 com rank>=7 ou P1/T2 com rank<=3)
+cobertura,localização do cotovelo da curva de cobertura,informativa,k=6 é o cotovelo natural — S_6 confirmado como hipótese principal
+D-E3-02,ANN com KernelExplainer dentro do orçamento de tempo,resolvida,max(runtime_ANN) = 42.3s < 600.0s — KernelExplainer suficiente
+§2.1,coerência bar/beeswarm ANN × XGBoost,qualitativa,top-3 numérico impresso; confirmar visualmente direção do efeito nos beeswarms
+§2.5,"contribuição relativa máxima de P1, T2",resolvida,P1 max = 2.62% ; T2 max = 1.84% (< 5%)
+D-E3-04,granularidade global; S_6 como hipótese principal,definida,"S_6 = ['T1', 'RRC1', 'BRC1', 'RRC2', 'BRC2', 'RFF']; convergência de 3 critérios (top-k fixo, cobertura 95%, união estável)"
+D-E3-04b,"varredura k ∈ {4, 5, 6} mantida",definida,"S_4 = ['BRC1', 'RRC1', 'RFF', 'RRC2']; S_5 = ['BRC1', 'RRC1', 'RFF', 'RRC2', 'T1']; S_6 = ['BRC1', 'RRC1', 'RFF', 'RRC2', 'T1', 'BRC2']"
+D-E3-11,comparação top-k global × união estável,convergente,Dupla validação: top-k global e união estável coincidem em S_6.

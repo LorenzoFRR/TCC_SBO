@@ -1,0 +1,9 @@
+feature,manter,criterio
+P1,False,uniao_top_4_estavel
+T1,True,uniao_top_4_estavel
+T2,False,uniao_top_4_estavel
+RRC1,True,uniao_top_4_estavel
+BRC1,True,uniao_top_4_estavel
+RRC2,True,uniao_top_4_estavel
+BRC2,True,uniao_top_4_estavel
+RFF,True,uniao_top_4_estavel
