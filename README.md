@@ -8,6 +8,8 @@ Nenhum simulador é executado. Todos os dados vêm do repositório público do R
 
 O ponto de entrada principal é [REGISTRO.md](REGISTRO.md): documento cronológico que narra a lógica, decisões e resultados de cada etapa. É o que deve ser lido primeiro para entender o projeto.
 
+O documento FLUXO_PROPOSTA.md documenta visualmente, em alto nível, a lógica da proposta desenvolvida.
+
 Todo o código+artefatos+tabelas+figuras está em Jupyter notebooks (`.ipynb`) dentro de `ARTEFATOS/ETAPA_N/`.
 
 ## Stack
