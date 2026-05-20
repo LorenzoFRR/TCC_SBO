@@ -1,0 +1,14 @@
+{
+  "k_estrela": 6,
+  "S_k_estrela": [
+    "T1",
+    "RRC1",
+    "BRC1",
+    "RRC2",
+    "BRC2",
+    "RFF"
+  ],
+  "arquitetura_recomendada": "SVR",
+  "r2k_medio": 0.972254,
+  "justificativa": "k=6 é o menor k com equivalência simultânea nos 3 outputs; SVR tem maior R²_k médio (0.9723) entre as arquiteturas elegíveis"
+}

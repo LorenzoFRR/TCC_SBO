@@ -1,15 +1,41 @@
-Este é um arquivo que documenta a implementação do projeto, etapa por etapa.
+# TCC SBO — Surrogate-Based Optimization para Colunas de Destilação
 
-Ao complementar e preencher este documento, verificar e adequar ao padrão de preenchimento das demais etapas/sub-etapas
+## Proposta
+
+O trabalho replica e estende o fluxo metodológico de Sultan et al. (2025) - o artigo é mencionado como "REF1" ao longo deste documento — modelagem substituta de um processo de produção de metanol verde a partir de dados públicos de simulação Aspen (LHS-2000). Cinco arquiteturas de surrogate (SVR, DT, RF, XGBoost, ANN) são treinadas sobre 8 variáveis de processo para prever três saídas (consumo de energia ET, vazão de metanol M_CH3OH, pureza x_CH3OH). A partir dos modelos baseline, aplica-se análise de importância via SHAP para identificar e descartar features irrelevantes, produzindo modelos reduzidos com k ∈ {4, 5, 6} inputs. A seleção final (k*=6, arquitetura SVR) é validada por equivalência estatística (bootstrap IC 95%) e por análise de sensibilidade global independente (Sobol). A etapa final explora a fronteira de Pareto do problema bi-objetivo (minimizar ET, maximizar M_CH3OH) com restrição de pureza ≥ 0.98, usando o surrogate selecionado como substituto computacional do simulador.
+
+## Sistema físico de referência
+
+O sistema estudado é uma planta contínua de produção de metanol verde via hidrogenação catalítica direta de CO₂ (rota Power-to-Liquid). O CO₂ é capturado de fontes industriais (siderúrgicas, cimenteiras, usinas a carvão) a 14 °C e 40 bar; o H₂ é produzido por eletrólise em célula PEM a partir de energia renovável, com pureza de até 99,99%, a 50 °C e 30 bar. As duas correntes são misturadas na proporção 1:3 (CO₂:H₂) e alimentadas a um reator tubular de leito fixo operado a 75 bar e 230 °C, com catalisador Cu/ZnO/Al₂O₃.
+
+As reações ocorrem no reator segundo a cinética de Vanden Bussche–Froment (VBF):
+
+- CO₂ + 3H₂ ↔ CH₃OH + H₂O (ΔH₂₉₈ = −49,4 kJ/mol)
+- CO₂ + H₂ ↔ CO + H₂O (ΔH₂₉₈ = +41,1 kJ/mol)
+- CO + 2H₂ ↔ CH₃OH (ΔH₂₉₈ = −91,3 kJ/mol)
+
+Os produtos do reator são resfriados a 30 °C. A fração gasosa não convertida é reciclada ao reator; a fração líquida segue para uma seção de destilação em dois estágios, onde o metanol é purificado até a especificação do produto final. O processo completo é modelado no simulador Aspen Plus V.14 com métodos de propriedades Soave–Redlich–Kwong e Peng–Robinson.
+
+As variáveis de operação que definem o ponto de operação da planta — e que constituem os 8 inputs dos surrogates — são: temperatura do reator (T₁), pressão do reator (P₁), temperatura de entrada na coluna de destilação (T₂), razões de refluxo e boil-up das duas colunas (RRC1, BRC1, RRC2, BRC2) e fração de purga da corrente de reciclo (RFF). As três saídas de interesse são a vazão mássica de metanol (M_CH₃OH), a pureza do produto (x_CH₃OH) e o consumo total de energia da planta (E_T).
+
+Foi criado um "dicionário de variáveis" - DICT_VARIAVEIS.md - para consulta, que mostra a relação dos códigos/nomes das entradas/saídas.
+
+## Resultados
+
+Os 15 surrogates baseline foram treinados e comparados com o REF1 — SVR e ANN alcançaram melhor desempenho geral (R² > 0.95 nos três outputs). A análise SHAP sobre os 5 modelos identificou P1 (pressão do reator) e T2 (temperatura de entrada na coluna) como features consensualmente irrelevantes em todos os modelos e outputs. Os modelos reduzidos com k=6 mantiveram R² equivalente ao baseline (equivalência verificada para SVR, RF e DT; XGBoost e ANN falharam em um output cada). SVR k=6 foi selecionado por ser o único com equivalência simultânea nos 3 outputs e maior R² médio. A análise de Sobol confirmou o descarte de P1 e T2 (S_T < 0.014 em todos os outputs) e a concordância com os rankings SHAP (ρ de Spearman médio = 0.919, sem divergências de |Δrank| ≥ 3). A fronteira de Pareto foi gerada via varredura LHS de 50.000 pontos, resultando em 20 soluções não dominadas com trade-off de aproximadamente 18× em ET para 2,8× em M_CH3OH entre os extremos da fronteira.
+
+---
+
+O texto que segue documenta a implementação do projeto, etapa por etapa.
 
 | Etapa | Descrição |
 |-------|-----------|
-| E0 | Carga e pré-processamento dos dados |
+| E0 | Carga e pré-processamento |
 | E1 | EDA |
 | E2 | Modelos baseline |
 | E3 | Modelos reduzidos (SHAP > feature selection > treino modelos reduzidos) |
-| E4 | Análise de Sensibilidade Global (Sobol + SHAP) |
-| E5 | Resultado Final |
+| E4 | Análise de Sensibilidade Global (Sobol) |
+| E5 | Consolidação (intermediária) de resultados |
 | E6 | Exploração da fronteira Pareto via surrogate |
 
 ---
@@ -40,13 +66,13 @@ Com os dados limpos, a EDA serve a dois propósitos: validar a qualidade do data
 ## Descrição sub-etapas
 - 1.1 — Correlação de Pearson (inputs × outputs e inputs × inputs): reprodução do heatmap do REF1
 - 1.2 — Sensibilidade 1D: efeito marginal de cada input sobre cada output com os demais fixos na mediana (RF auxiliar para curvas suaves)
-    - A análise de sensibilidade da Etapa 1 é apenas exploratória/descritiva (contexto narrativo inicial)
+    - OBS: A análise de sensibilidade da Etapa 1 é apenas exploratória/descritiva (contexto narrativo inicial)
 - 1.3 — Distribuições dos inputs:
 - 1.4 — Distribuições dos outputs: ET com cauda longa à direita; x_CH3OH concentrada próximo de 1; M_CH3OH aproximadamente uniforme.
 - 1.5 — Assinatura LHS: verificação formal da uniformidade por bin, corroborando a técnica de amostragem declarada no REF1.
 
 ## Definições
-- Análises de comparação entre técnicas de amostragem e efeito do tamanho amostral (presentes no REF1) não foram reproduzidas — o repositório público disponibiliza apenas LHS-2000.
+- D-E1-01: Análises de comparação entre técnicas de amostragem e efeito do tamanho amostral (presentes no REF1) não foram reproduzidas — o repositório público disponibiliza apenas LHS-2000.
 
 ## Artefatos:
 - `1_eda.ipynb`
@@ -56,8 +82,6 @@ Com os dados limpos, a EDA serve a dois propósitos: validar a qualidade do data
 - `1.3_hist_inputs.png`
 - `1.4_hist_outputs.png`
 - `1.5_lhs_uniformidade.png`
-
-## Resultados
 
 ### 1.2 — Sensibilidade 1D
 
@@ -84,8 +108,6 @@ Treino e avaliação dos 5 modelos definidos no REF1 (SVR, DT, RF, XGBoost, ANN)
 - 2.3 — Comparação consolidada: ranking por R² médio, scatter plots predito × real por output
 
 ## Definições
-- D-E2-01: test set com 193 amostras (vs. 200 do REF1) — diferença atribuída ao filtro de convergência
-- D-E2-02: SVR com R² sistematicamente acima do REF1 em todos os outputs — provável diferença de hiperparâmetros não publicados; resultados considerados válidos pois superaram o benchmark
 - D-E2-03: ANN — duas variantes testadas (v1: 200 epochs + EarlyStopping; v2: 500 epochs fixos). v2 adotada por melhor R² geral; parâmetros exatos do REF1 não publicados
 
 ## Artefatos
@@ -102,6 +124,8 @@ Treino e avaliação dos 5 modelos definidos no REF1 (SVR, DT, RF, XGBoost, ANN)
     - `2.3_baseline_comparacao.ipynb`
     - `2.3_ranking_modelos.png`
     - `2.3_scatter_*.png`
+- `baseline_resultados.csv`
+- `baseline_resultados_mlflow.md`
 
 - Modelos serializados: `MODELO/TARGET/model.{pkl,keras}` (15 surrogates)
 - Tabela consolidada de métricas (R², MSE, MAE) por modelo e output: `baseline_resultados.csv`
@@ -109,7 +133,7 @@ Treino e avaliação dos 5 modelos definidos no REF1 (SVR, DT, RF, XGBoost, ANN)
 
 ## Resultados
 
-R² no test set — comparação com REF1 (critério: |Δ| ≤ 0.02):
+R² no test set — comparação com REF1 (critério: |Δ| ≤ 0.02 utilizado como base):
 
 | Modelo  | R²(ET) | R²(ET) REF1 | Δ(ET)   | R²(M_CH3OH) | R²(M_CH3OH) REF1 | Δ(M_CH3OH) | R²(x_CH3OH) | R²(x_CH3OH) REF1 | Δ(x_CH3OH) |
 |---------|--------|-------------|---------|-------------|------------------|------------|-------------|------------------|------------|
@@ -123,13 +147,14 @@ Combinações dentro da tolerância: 5/15.
 
 As divergências são atribuídas a hiperparâmetros não publicados pelo REF1 e à diferença de 7 amostras no test set. SVR superou o benchmark em todos os outputs. Os 15 surrogates foram serializados para uso nas etapas seguintes.
 
+Os resultados presentes no MLflow foram gerados também em baseline_resultados_mlflow.md
+
 # ETAPA 3 — Modelos Reduzidos (SHAP → Feature Selection → Treino → Seleção)
 
 ## Descrição
 Com os 15 surrogates da ETAPA 2, esta etapa implementa o pipeline de redução de dimensionalidade: calcular importâncias SHAP para cada modelo e output > derivar subconjuntos de features por cutoff de cobertura > treinar modelos reduzidos (k=4,5,6) e selecionar o par (k*, arquitetura) mais parcimonioso que mantém desempenho estatisticamente equivalente ao modelo completo.
 
 ## Descrição sub-etapas
-
 - 3.0 — Configuração do experimento MLflow `reduzido` e estrutura de diretórios
 - 3.1 — SHAP sobre os 5 baselines: cálculo de valores SHAP (TreeExplainer para RF/DT/XGBoost, KernelExplainer para SVR/ANN) no validation set; geração de bar e beeswarm plots por modelo × output; consolidado de ranks em `3.1_shap_consolidado.csv`
     - 3.1.1 — Análise SHAP: interpretação dos padrões de importância entre modelos; P1 e T2 consistentemente de baixa importância em todos os 5 modelos e nos 3 outputs; heatmap de ranks e diagrama de cobertura
@@ -146,32 +171,49 @@ Com os 15 surrogates da ETAPA 2, esta etapa implementa o pipeline de redução d
 - D-E3-03: P1 e T2 descartados em todos os k ≤ 6 — consistente com a baixa importância SHAP observada nos 5 modelos
 - D-E3-08: Margem de equivalência δ = 0.02 — equivalência declarada quando IC_sup ≤ δ (modelo reduzido pode ser no máximo 0.02 pior em R² que o baseline)
 - D-E3-09: Bootstrap pareado com B=1000 réplicas — os mesmos índices reamostrados são usados para y_true, p8 e pk, capturando a correlação entre estimadores
+- D-E3-10: SVR (k = 6) foi a arquitetura escolhida para os testes nas etapas posteriores, já que satisfez os critérios impostos:
+    - Equivalência ao baseline nos 3 outputs (via r2)
+    - Maior r2 dentre os que apresentaram equivalência ao baseline nos 3 outputs
 
 ## Artefatos
-
+- 3.0
+    - `3.0_SETUP/3.0_setup_reduzido.ipynb`
 - 3.1
-    - 3.1_bar_{modelo}_{saída}
-        - |SHAP| médio : importância de cada entrada, por saída, por modelo {refinar descrição}
-    - 3.1_beeswarm_{modelo}_{saída}
-        - {preencher descrição}
+    - `3.1_SHAP/3.1_shap_baselines.ipynb`
+    - `3.1_SHAP/3.1_BAR/3.1_bar_{modelo}_{saída}.png` — 15 bar plots
+    - `3.1_SHAP/3.1_BEESWARM/3.1_beeswarm_{modelo}_{saída}.png` — 15 beeswarm plots
+    - `3.1_SHAP/3.1_diag_heatmap_ranks.png`
+    - `3.1_SHAP/3.1_diag_cobertura.png`
+    - `3.1_SHAP/3.1_diag_cutoff_sugerido.csv`
+    - `3.1_SHAP/3.1_shap_consolidado.csv`
+    - `3.1_SHAP/artefatos/{MODELO}_{TARGET}_shap.npy` — 15 matrizes SHAP
+    - 3.1.1
+        - `3.1_SHAP/3.1.1_analise_shap.ipynb`
+    - 3.1.2
+        - `3.1_SHAP/3.1.2_mapa_shap.ipynb`
+        - `3.1_SHAP/3.1.2_painel_S6.png`
+        - `3.1_SHAP/3.1.2_diagnostico_decisoes.csv`
+        - `3.1_SHAP/3.1.2_CELL_OUTPUTS.md`
 - 3.2
-    - `3.2_feature_selection.ipynb`
-    - `selecao/3.2_subconjuntos.csv`
+    - `3.2_FEAT_SELECTION/3.2_feature_selection.ipynb`
+    - `3.2_FEAT_SELECTION/3.2_subconjuntos.csv`
 - 3.3
-    - `3.3_reduzido_sklearn.ipynb`
-    - `3.3_reduzido_ann.ipynb`
-    - `reduzido/3.3_ann_learning_curves_k{4,5,6}.png`
-    - `reduzido/MODELO/TARGET/kN/` — 45 surrogates serializados
+    - `3.3_REDUZIDO/3.3_reduzido_sklearn.ipynb`
+    - `3.3_REDUZIDO/3.3_reduzido_ann.ipynb`
+    - `3.3_REDUZIDO/3.3_ann_learning_curves_k{4,5,6}.png`
+    - `3.3_REDUZIDO/runs.csv`
+    - `3.3_REDUZIDO/MODELO/TARGET/kN/model.{pkl,keras}` — 45 surrogates serializados
 - 3.4
-    - `3.4_equivalencia_estatistica.ipynb`
-    - `equivalencia/3.4_equivalencia_resultados.csv`
-    - `equivalencia/3.4_forest_plot.png`
-    - `equivalencia/3.4_heatmap_equivalencia.png`
+    - `3.4_EQUIVALENCIA/3.4_equivalencia_estatistica.ipynb`
+    - `3.4_EQUIVALENCIA/3.4_equivalencia_resultados.csv`
+    - `3.4_EQUIVALENCIA/3.4_forest_plot.png`
+    - `3.4_EQUIVALENCIA/3.4_heatmap_equivalencia.png`
+    - `3.4_EQUIVALENCIA/3.4_predicoes_test.npz`
 - 3.5
-    - `3.5_selecao_k_estrela.ipynb`
-    - `reduzido/3.5_k_estrela.json`
-    - `reduzido/3.5_ranking_final.png`
-    - `reduzido/3.5_tabela_final.png`
+    - `3.5_RANKING_FINAL/3.5_selecao_k_estrela.ipynb`
+    - `3.5_RANKING_FINAL/3.5_k_estrela.json`
+    - `3.5_RANKING_FINAL/3.5_ranking_final.png`
+    - `3.5_RANKING_FINAL/3.5_tabela_final.png`
 
 ## Resultados
 
@@ -320,14 +362,6 @@ IC_sup por (arquitetura, output) a k=6:
 | XGBoost |  0.000     | ✓      |  0.017          | ✓      |  0.030          | ✗      | ✗    |
 | ANN     |  0.001     | ✓      |  0.024          | ✗      | −0.003          | ✓      | ✗    |
 
-#### Forest plot (3.4_forest_plot.png)
-
-Um subplot por output (ET, M_CH3OH, x_CH3OH). Cada linha representa uma combinação (arquitetura, k); a barra é o IC 95% de ΔR² e o marcador é a média bootstrap. A linha tracejada vertical em δ=0.02 é o limiar de equivalência: barras cujo extremo direito fica à esquerda dessa linha correspondem a modelos equivalentes. A linha pontilhada em 0 referencia a paridade exata com o baseline. O gráfico permite identificar visualmente não só quais combinações passam o critério, mas também a margem — barras completamente à esquerda de 0 indicam superioridade estatística do modelo reduzido.
-
-#### Heatmap (3.4_heatmap_equivalencia.png)
-
-Grade arquitetura × k (colunas k=4, k=5, k=6) replicada para cada output. Células verdes indicam equivalência (IC_sup ≤ δ) e vermelhas indicam falha; o valor anotado em cada célula é o IC_sup, permitindo quantificar a margem de aprovação ou de reprovação. O heatmap complementa o forest plot: enquanto este detalha a forma e posição de cada IC, o heatmap fornece a leitura consolidada da decisão binária por (arquitetura, output, k).
-
 #### Observações
 - k=4: nenhum modelo atinge equivalência em nenhum output; as quedas de R² são grandes em todos os casos
 - k=5: equivalência apenas em ET (DT, RF, XGBoost, ANN) — SVR não alcança equivalência em nenhum output a k=5 (IC_sup(ET) = 0.025 > δ); M_CH3OH e x_CH3OH nunca são equivalentes a k=5
@@ -335,6 +369,7 @@ Grade arquitetura × k (colunas k=4, k=5, k=6) replicada para cada output. Célu
 - XGBoost falha em x_CH3OH a k=6: IC_sup = 0.030 > δ; a queda de R² (0.945 → 0.935) é confirmada como não trivial pelo bootstrap
 - ANN falha em M_CH3OH a k=6: IC_sup = 0.024 > δ; a queda de R² (0.985 → 0.970) também confirmada como não trivial
 - RF apresenta IC_sup < 0 em ET e x_CH3OH a k=6 (respectivamente −0.002 e −0.004), indicando que o modelo reduzido é estatisticamente superior ao baseline nesses outputs; SVR também apresenta IC_sup < 0 em x_CH3OH (−0.001) — efeito de regularização pela remoção de P1 e T2
+
 
 # ETAPA 4 — Análise de Sensibilidade Global (Sobol)
 
@@ -367,28 +402,28 @@ O surrogate SVR foi adotado como função substituta para o cálculo do Sobol po
 ## Artefatos
 
 - 4.0
-    - `4.0_setup_sobol.ipynb`
+    - `4.0/4.0_setup_sobol.ipynb`
 - 4.1
-    - `4.1_sobol_8inputs.ipynb`
-    - `4.1_sobol_8inputs_resultados.csv`
-    - `4.1_sobol_8inputs_barplot_ET.png`
-    - `4.1_sobol_8inputs_barplot_M.png`
-    - `4.1_sobol_8inputs_barplot_x.png`
+    - `4.1/4.1_sobol_8inputs.ipynb`
+    - `4.1/4.1_sobol_8inputs_resultados.csv`
+    - `4.1/4.1_sobol_8inputs_barplot_ET.png`
+    - `4.1/4.1_sobol_8inputs_barplot_M.png`
+    - `4.1/4.1_sobol_8inputs_barplot_x.png`
 - 4.2
-    - `4.2_sobol_6inputs.ipynb`
-    - `4.2_sobol_6inputs_resultados.csv`
-    - `4.2_sobol_comparacao_8vs6_por_output.png`
+    - `4.2/4.2_sobol_6inputs.ipynb`
+    - `4.2/4.2_sobol_6inputs_resultados.csv`
+    - `4.2/4.2_sobol_comparacao_8vs6_por_output.png`
 - 4.3
-    - `4.3_comparacao_sobol_shap.ipynb`
-    - `4.3_divergencias.csv`
-    - `4.3_spearman_heatmap.png`
-    - `4.3_narrativa.md`
+    - `4.3/4.3_comparacao_sobol_shap.ipynb`
+    - `4.3/4.3_divergencias.csv`
+    - `4.3/4.3_spearman_heatmap.png`
+    - `4.3/4.3_narrativa.md`
 - 4.4
-    - `4.4_analise_interacoes.ipynb`
-    - `4.4_interacoes_barplot_ET.png`
-    - `4.4_interacoes_barplot_M.png`
-    - `4.4_interacoes_barplot_x.png`
-    - `4.4_cruzamento_sobol_shap.md`
+    - `4.4/4.4_analise_interacoes.ipynb`
+    - `4.4/4.4_interacoes_barplot_ET.png`
+    - `4.4/4.4_interacoes_barplot_M.png`
+    - `4.4/4.4_interacoes_barplot_x.png`
+    - `4.4/4.4_cruzamento_sobol_shap.md`
 
 ## Resultados
 
@@ -428,7 +463,6 @@ Leitura prática dos padrões:
 - S_T ≈ 0 e S₁ ≈ 0: feature irrelevante, tanto isoladamente quanto em interação — candidata a descarte
 
 Cada índice vem acompanhado de um intervalo de confiança (S1_conf, ST_conf) estimado via bootstrap interno do SALib. Valores de S₁ ligeiramente negativos são artefatos numéricos de variância amostral finita e são tratados como S₁ ≈ 0 (D-E4-03).
-
 
 Índices S₁ (primeira ordem) e S_T (total) calculados via método de Saltelli (N=2048, 2N(8+2)=40960 avaliações) sobre o surrogate SVR k=8.
 
@@ -580,14 +614,6 @@ O CSV `4.3_divergencias.csv` não registrou nenhuma linha de divergência — to
 | M_CH3OH | 0.900 |
 | x_CH3OH | 0.958 |
 
-#### Interpretação por output
-
-ET: RFF e BRC1 dominam em ambos os critérios (Sobol: S₁ = 0.437 e 0.318; SHAP: ranks 1 e 2 em todos os modelos). T1 e RRC1 apresentam divergência moderada de posição — T1 aparece em rank 4 no Sobol e em ranks 3–5 no SHAP, enquanto RRC1 tem S₁ ≈ 0 mas importância SHAP não nula, reflexo do caráter interativo de RRC1 para ET (S_T = 0.027 vs. S₁ ≈ 0 em 4.1).
-
-M_CH3OH: quatro features de importâncias similares (T1, RRC1, BRC1, RFF) geram maior sensibilidade do ranking a pequenas diferenças numéricas. O Sobol posiciona BRC1 à frente de T1 (S₁: 0.214 vs. 0.199); o SHAP dos modelos árvore/ensemble tende a inverter essa ordem. Variação de 1–2 posições num bloco equipotente é esperada e não representa contradição.
-
-x_CH3OH: concordância mais elevada (ρ = 0.958). RRC1 domina com larga margem em ambos os critérios (S₁ = 0.522, rank SHAP = 1 em todos os modelos). BRC1 ocupa a segunda posição em ambos. RFF tem S₁ ≈ 0 e S_T = 0.015, coincidindo com rank SHAP = 6, reforçando que a pureza é controlada pelas condições de separação da coluna 1.
-
 #### P1 e T2
 
 | Feature | Output | Sobol rank (S₁) | SHAP rank médio |
@@ -600,12 +626,6 @@ x_CH3OH: concordância mais elevada (ρ = 0.958). RRC1 domina com larga margem e
 | T2 | x_CH3OH | 7 | 8.0 |
 
 Ambos os critérios posicionam P1 e T2 nos dois últimos ranks para os três outputs — confirmando por triangulação independente o descarte imposto em S₆.
-
-#### Causas das divergências residuais
-
-- Multicolinearidade: SHAP redistribui importância entre features correlacionadas (T1–BRC1–RFF têm correlação moderada no dataset LHS); o Sobol usa amostras uniformes independentes, medindo sensibilidade num espaço sem correlação.
-- Distribuição amostral: o Sobol assume distribuição uniforme no espaço físico, enquanto o LHS da Etapa 0 tem densidade não-uniforme em regiões fisicamente relevantes.
-- Interações vs. efeito aditivo: para features com S₁ ≈ 0 e S_T > 0 (ex.: RRC1 em ET), a variância é majoritariamente interativa; o SHAP aditivo distribui essa importância de forma diferente do Sobol.
 
 #### Conclusão
 
@@ -641,24 +661,13 @@ M_CH3OH: RRC1 é o único par elegível (frac = 0.34). Com S_T ≈ 0.24, cerca d
 
 x_CH3OH: output com maior carga de interação. BRC1, RRC2 e BRC2 têm S_T relevantes mas S₁ pequenos — efeito predominantemente interativo. Os beeswarms de ANN e XGBoost exibem padrão de cluster para essas três features: o SHAP value varia conforme o contexto das demais variáveis, coerente com a quantificação Sobol. RRC1 também fica acima do limiar (frac = 0.30), com padrão disperso. T1 tem frac = 0.89 mas S_T = 0.028, próximo de ST_MIN — beeswarm não foi avaliado por importância total baixa.
 
-#### Acoplamentos identificados
-
-| Par | Output | Mecanismo provável |
-|-----|--------|--------------------|
-| RRC1–BRC1 | M_CH3OH, x_CH3OH | Refluxo e boil-up da coluna 1 determinam conjuntamente o balanço da separação primária |
-| RRC2–BRC2 | x_CH3OH | Refluxo e boil-up da coluna 2 controlam a pureza final; o efeito de um depende do outro |
-| RRC2–outros | ET | Operação da coluna 2 interage com o circuito global no consumo energético |
-
-Os acoplamentos refluxo–boil-up por coluna (RRC1–BRC1 e RRC2–BRC2) são fisicamente coerentes: a pureza do destilado e a vazão de produto dependem do balanço entre os dois parâmetros operacionais de cada coluna, não do valor de cada um isoladamente.
-
 #### Consistência com SHAP
 
 Features com alta frac_interacao (BRC1, RRC2, BRC2 para x_CH3OH) exibem maior dispersão vertical nos beeswarms — o mesmo valor da feature produz SHAP values distintos conforme o contexto das demais. Esse padrão de cluster confirma o que o índice S_T − S₁ quantifica: importância que só emerge combinada com outras variáveis. Para ET e M_CH3OH, as features interativas (RRC1, T1, RRC2) exibem padrão disperso sem estrutura clara de cluster, coerente com a ausência de dominância de um único acoplamento.
 
-# ETAPA 5 — Resultado Final
+# ETAPA 5 — Consolidação (intermediária) de resultados
 
 ## Descrição
-
 Com todos os surrogates treinados e as análises de sensibilidade concluídas, esta etapa consolida os resultados das Etapas 2–4 em dois artefatos finais: uma tabela comparativa de R² (baseline k=8 vs. reduzido k*=6) e um painel unificado com as três camadas de evidência que validam H1. Nenhum modelo é carregado ou treinado — toda a computação é leitura e visualização de artefatos já produzidos.
 
 **H1:** As features P1 (pressão do reator) e T2 (temperatura de entrada na coluna de destilação) são irrelevantes para os três outputs do processo. (Hipótese a ser testada)
@@ -732,27 +741,54 @@ As três camadas convergem: P1 e T2 têm contribuição desprezível por qualque
 
 ## Descrição
 
-Com o surrogate SVR k*=6 validado, esta etapa aplica o modelo substituto ao problema de otimização bi-objetivo: minimizar o consumo energético (ET) e maximizar a produção de metanol (M_CH3OH), sujeito à restrição de pureza x_CH3OH ≥ 0.98. O ponto de partida são as superfícies de resposta dos pares de features mais importantes identificados nas Etapas 3 e 4 — BRC1 × RFF para ET e M_CH3OH, e RRC1 × BRC1 para x_CH3OH, que revelam a não-linearidade do processo e antecipam a estrutura do trade-off. A fronteira de Pareto é então gerada por amostragem LHS de 50.000 pontos sobre o espaço S₆, com filtragem pela restrição de pureza e identificação das soluções não dominadas. A análise de trade-off encerra a etapa descrevendo os extremos da fronteira e a região de compromisso em termos de inputs e saídas do processo.
+Com o surrogate SVR k*=6 validado e a sensibilidade global caracterizada, esta etapa explora a fronteira de Pareto do problema bi-objetivo (minimizar ET, maximizar M_CH3OH) com restrição operacional de pureza x_CH3OH ≥ 0.98. O percurso parte da visualização geométrica do landscape de otimização — superfícies de resposta sobre os subplanos (BRC1, RFF) e (RRC1, BRC1) do espaço S₆ — avança para a geração formal da fronteira via varredura LHS de 50.000 pontos sobre o espaço completo de S₆, e encerra com a análise dos três pontos-chave da fronteira (extremos e região de compromisso) em linguagem de processo. O surrogate substitui o simulador Aspen como função de avaliação, tornando viável a exploração de dezenas de milhares de pontos de operação em segundos.
+
+## Sub-etapas
+
+- 6.1 — Superfícies de resposta de ET e M_CH3OH em função de (BRC1, RFF): mapeamento visual do comportamento do surrogate SVR k*=6 sobre o subplano dos dois inputs de maior efeito aditivo sobre ET (S₁=0.437 e 0.318, Sobol 4.1), com os demais inputs fixados na média das faixas físicas; overlay dos 193 pontos do test set nos mapas de contorno como diagnóstico de suporte empírico
+- 6.2 — Superfície de resposta de x_CH3OH em função de (RRC1, BRC1): análise equivalente para o output de pureza, sobre o par de inputs de maior importância global para x_CH3OH (RRC1 rank 1, BRC1 rank 2 em SHAP e Sobol)
+- 6.3 — Fronteira de Pareto ET × M_CH3OH: geração formal via varrimento LHS de 50.000 pontos sobre S₆; filtragem por viabilidade (x_CH3OH ≥ 0.98, 63,5% do espaço); identificação das 20 soluções não dominadas por dominância de Pareto clássica; salvamento dos pontos candidatos em `6.3_pareto_solucoes.csv`
+- 6.4 — Análise de trade-off e narrativa: tradução das soluções Pareto-ótimas em conhecimento operacional; identificação dos inputs discriminantes (BRC1 e RFF) e dos inputs estreitos (T1, RRC1, RRC2); caracterização da amplitude do trade-off (~18× em ET para ~2,8× em M_CH3OH); verificação de coerência com os índices Sobol e SHAP das Etapas 3 e 4
+
+## Definições
+
+- D-E6-01: Surrogate SVR k*=6 usado como função de avaliação em todas as sub-etapas — mesmo modelo selecionado em 3.5 e validado nas Etapas 3–4; não há novos modelos treinados
+- D-E6-02: Ceteris paribus em 6.1 e 6.2 — inputs não variados fixados na média das faixas físicas normalizadas; limitação explícita resolvida em 6.3 com varredura completa
+- D-E6-03: Varredura LHS em 6.3 — 50.000 pontos quasi-uniformes sobre S₆; não é otimização iterativa, mas cobertura discreta da fronteira contínua
+- D-E6-04: Restrição de pureza x_CH3OH ≥ 0.98 — especificação operacional do REF1; avaliada pelo surrogate SVR k*=6 treinado para x_CH3OH
+- D-E6-05: Fronteira de Pareto com 20 soluções não dominadas — discretização por varrimento; resolução depende da densidade amostral (50.000 pontos)
+- D-E6-06: Três regiões da fronteira (mínimo-ET, compromisso, máximo-M_CH3OH) definidas por percentis de ET — escolha de discretização para legibilidade narrativa, não ótimos absolutos
+
+## Artefatos
+
+- 6.1
+    - `6.1_superficies_BRC1_RFF.ipynb`
+    - `6.1_superficie_ET_BRC1_RFF.png`
+    - `6.1_superficie_M_BRC1_RFF.png`
+    - `6.1_contorno_ET_BRC1_RFF.png`
+    - `6.1_contorno_M_BRC1_RFF.png`
+- 6.2
+    - `6.2_superficie_x_RRC1_BRC1.ipynb`
+    - `6.2_superficie_x_RRC1_BRC1.png`
+    - `6.2_contorno_x_RRC1_BRC1.png`
+- 6.3
+    - `6.3_pareto_ET_M.ipynb`
+    - `6.3_pareto_ET_M.png`
+    - `6.3_pareto_solucoes.csv`
+- 6.4
+    - `6.4_analise_tradeoff.ipynb`
+    - `6.4_pareto_anotado.png`
+    - `6.4_narrativa.md`
 
 ## Descrição sub-etapas
-
-- 6.1 — Superfícies de resposta de ET e M_CH3OH em função de (BRC1, RFF): grade 200×200 varrendo as faixas físicas dos dois inputs com maior índice de Sobol de primeira ordem para ET (RFF: S₁=0.437, BRC1: S₁=0.318; Etapa 4); os demais 4 inputs de S₆ são fixados na média da faixa física (D-E6-02). Nenhum modelo é treinado — toda computação é avaliação do surrogate SVR k*=6. O mesmo par (RFF, BRC1) é usado para M_CH3OH para permitir comparação direta das duas superfícies sobre a mesma grade (D-E6-03). São gerados superfície 3D e mapa de contorno para cada output, com overlay dos 193 pontos do test set nos mapas de contorno.
-
-- 6.2 — Superfície de resposta de x_CH3OH em função de (RRC1, BRC1): mesmo setup de grade 200×200, com o par selecionado pela maior frac_interação Sobol para x_CH3OH na Etapa 4.4 — BRC1 e RRC1 formam o acoplamento refluxo–boil-up da coluna 1 (D-E6-04); os demais 4 inputs de S₆ são fixados na média da faixa física, incluindo RFF=0.13 (D-E6-05). Nenhum modelo é treinado — avaliação do surrogate SVR k*=6 para x_CH3OH. O mapa de contorno inclui a linha de restrição x_CH3OH=0.98, que antecipa o filtro de viabilidade de 6.3 e delimita visualmente a região Pareto-elegível no espaço (RRC1, BRC1).
-
-- 6.3 — Fronteira de Pareto ET × M_CH3OH: amostragem LHS de 50.000 pontos sobre o espaço S₆ (seed=42, D-E6-09), avaliação dos três surrogates SVR k*=6 e filtro pela restrição de pureza x_CH3OH ≥ 0.98 (D-E6-06) — que produziu 31.745 amostras viáveis (63,5% do total), dispensando o fallback para 0.95. Das amostras viáveis, o algoritmo de varrimento por dominância (D-E6-08) identificou 20 soluções não dominadas, salvas em `6.3_pareto_solucoes.csv`. A fronteira confirma o trade-off esperado: o extremo de mínimo ET (6.679 kW) corresponde a BRC1=0.57 e RFF=0.25, com produção de apenas 4.568 kg/hr; o extremo de máximo M_CH3OH (12.881 kg/hr) exige ET=84.230 kW com BRC1=9.05 e RFF=0.01 — trade-off de ~18× em consumo energético para ~2,8× em produção. A figura `6.3_pareto_ET_M.png` exibe os 31.745 pontos viáveis em cinza e a fronteira em azul, com os dois extremos marcados.
-
-- 6.4 — Análise de trade-off e narrativa: carrega `6.3_pareto_solucoes.csv` e identifica três pontos-chave da fronteira — mínimo ET, máximo M_CH3OH e região de compromisso (percentis 33–67 de ET, D-E6-10). O ponto de mínimo ET (6.679 kW, M_CH3OH=4.568 kg/hr) é atingido com BRC1=0.57 e RFF=0.247, coerente com os S₁ de Sobol da Etapa 4 (RFF domina ET com S₁=0.437, BRC1 com S₁=0.318) — BRC1 baixo reduz o duty do refervedor da coluna 1 e RFF alto diminui a carga do loop de reciclo ao custo da conversão. O ponto de máximo M_CH3OH (12.881 kg/hr, ET=84.230 kW) inverte os dois inputs: BRC1=9.05 e RFF=0.013, com consumo 12,6× maior que o extremo energético. A região de compromisso (ET≈25.342 kW, M_CH3OH≈10.340 kg/hr) produz ~80% da produção máxima com ~30% da energia máxima, com BRC1=1.74 e RFF=0.032 como inputs discriminantes; T1, RRC1 e RRC2 permanecem estreitos ao longo de toda a fronteira, confirmando BRC1 e RFF como os principais graus de liberdade do trade-off. Os artefatos gerados são `6.4_pareto_anotado.png` (fronteira com os três pontos marcados) e `6.4_narrativa.md`.
-
-## Explicação
 
 ### 6.1 — Superfícies de resposta: ET e M_CH3OH em função de (BRC1, RFF)
 
 Objetivo: mapear visualmente o comportamento do surrogate SVR k*=6 sobre o subplano formado pelos dois inputs de maior efeito aditivo sobre ET no espaço S₆ — RFF (S₁=0.437) e BRC1 (S₁=0.318), conforme calculado na Etapa 4.1. As superfícies geradas revelam a geometria das respostas ET e M_CH3OH sobre esse subplano, antecipando a estrutura do trade-off antes da geração formal da fronteira Pareto em 6.3 e verificando que o surrogate capturou as não-linearidades esperadas do processo.
 
-Premissas: a escolha do par (BRC1, RFF) é orientada pelos índices de primeira ordem de Sobol (S₁), que quantificam o efeito individual de cada input sobre a variância do output de forma agnóstica ao modelo. Usar os dois inputs com maior S₁ para ET garante que o subplano inspecionado cobre a maior parte da variância aditiva do output mais relevante para a otimização energética. Os demais 4 inputs de S₆ são fixados na média das faixas físicas — abordagem de ceteris paribus, padrão para visualização de superfícies de resposta em espaços de alta dimensão: isola o comportamento do par de interesse sem colapsar a representatividade do surrogate. A aplicação do mesmo par para M_CH3OH, mesmo que BRC1 e RFF não sejam os dois inputs de maior S₁ para a vazão, é deliberada: só faz sentido avaliar o trade-off visualmente se as duas superfícies forem comparadas sobre a mesma grade de inputs — mover o par (BRC1, RFF) enquanto se observa simultaneamente a resposta em ET e M_CH3OH é o que torna o conflito entre os dois objetivos diretamente legível.
+Premissas: a escolha do par (BRC1, RFF) é orientada pelos índices de primeira ordem de Sobol (S₁), que quantificam o efeito individual de cada input sobre a variância do output de forma agnóstica ao modelo. Usar os dois inputs com maior S₁ para ET garante que o subplano inspecionado cobre a maior parte da variância aditiva do output mais relevante para a otimização energética. Os demais 4 inputs de S₆ são fixados na média das faixas físicas. A aplicação do mesmo par para M_CH3OH, mesmo que BRC1 e RFF não sejam os dois inputs de maior S₁ para a vazão foi feita de tal modo que fosse possível avaliar o trade-off visualmente com as duas superfícies comparadas sobre a mesma grade de inputs — mover o par (BRC1, RFF) enquanto se observa simultaneamente a resposta em ET e M_CH3OH é o que torna o conflito entre os dois objetivos diretamente legível.
 
-A escolha do par é evidência quantitativa (Sobol S₁, Etapa 4.1). Fixar os demais inputs na média é um ponto de operação de referência, e a limitação é explícita: as superfícies mostram o comportamento marginalizado nesses valores fixos, não o landscape completo. Essa limitação é resolvida em 6.3, onde todos os 6 inputs variam livremente via LHS de 50.000 pontos.
+A escolha do par é evidência quantitativa (Sobol S₁, Etapa 4.1). Fixar os demais inputs na média é um ponto de operação de referência, e a limitação é explícita: as superfícies mostram o comportamento marginalizado nesses valores fixos, não o landscape completo. Essa limitação é resolvida em 6.3 (Fronteira de Pareto), onde todos os 6 inputs variam livremente via LHS de 50.000 pontos.
 
 O que é avaliado: a forma geométrica das superfícies — regiões de baixo ET com M_CH3OH ainda razoável identificam visualmente candidatos a soluções Pareto-eficientes. Gradientes acentuados indicam alta sensibilidade local: pequenas variações em BRC1 ou RFF produzem grandes variações no output. A comparação das superfícies de ET e M_CH3OH sobre a mesma grade revela em que regiões os dois objetivos conflitam (gradientes em direções opostas) e em que regiões são neutros entre si. O overlay dos 193 pontos do test set nos mapas de contorno serve como diagnóstico de suporte empírico: confirma que o surrogate está sendo avaliado em regiões com dados reais próximos, não extrapolando para espaços não amostrados — relevante porque as superfícies são predições de um modelo, não simulações do processo.
 
@@ -766,38 +802,22 @@ Objetivo: gerar formalmente a fronteira de Pareto do problema bi-objetivo (minim
 
 Premissas: o surrogate SVR k*=6 é suficientemente fiel ao processo real para que as predições no espaço amostrado sejam interpretáveis como o comportamento do sistema — premissa validada empiricamente nas Etapas 3 (equivalência estatística) e 4 (consistência Sobol × SHAP). A amostragem LHS de 50.000 pontos sobre as faixas físicas de S₆ não é uma otimização iterativa: é uma cobertura quasi-uniforme do espaço de busca que gera uma aproximação discreta da fronteira contínua. A qualidade dessa aproximação depende da densidade amostral e da suavidade do surrogate, não de convergência de um algoritmo de gradiente. O algoritmo de varrimento por dominância identifica, dentro do conjunto de pontos viáveis, aqueles para os quais nenhum outro ponto viável apresenta simultaneamente ET menor e M_CH3OH maior — definição clássica de dominância de Pareto.
 
-A restrição x_CH3OH ≥ 0.98 é a condição operacional mínima para que o metanol produzido tenha valor comercial (especificação de pureza de produto). Ela é avaliada diretamente pelo surrogate SVR k*=6 treinado para x_CH3OH — o mesmo modelo validado nas Etapas 3 e 4. A taxa de viabilidade resultante (63,5%, ou 31.745 de 50.000 pontos) indica que a restrição de pureza é genuinamente restritiva: ela elimina aproximadamente um terço do espaço de busca, concentrando a fronteira de Pareto em regiões onde as condições operacionais são suficientemente seletivas para garantir pureza.
+A restrição x_CH3OH ≥ 0.98 é avaliada diretamente pelo surrogate SVR k*=6 treinado para x_CH3OH — o mesmo modelo validado nas Etapas 3 e 4. A taxa de viabilidade resultante (63,5%, ou 31.745 de 50.000 pontos) indica que a restrição de pureza é genuinamente restritiva: ela elimina aproximadamente um terço do espaço de busca, concentrando a fronteira de Pareto em regiões onde as condições operacionais são suficientemente seletivas para garantir pureza.
 
 O que é avaliado: a existência, forma e extensão da fronteira de Pareto no espaço ET × M_CH3OH, sob restrição de pureza. A figura `6.3_pareto_ET_M.png` permite ler diretamente quais combinações (ET, M_CH3OH) são Pareto-ótimas e quais são dominadas — o conjunto cinza (viáveis dominados) e a curva azul (Pareto-eficientes) contam a história completa do espaço de soluções. As 20 soluções não dominadas salvas em `6.3_pareto_solucoes.csv` são o artefato operacional: cada linha é um ponto de operação candidato, com os 6 inputs e as 3 saídas previstas pelo surrogate.
 
 A fronteira não é uma solução única — é um conjunto de soluções igualmente defensáveis do ponto de vista da otimização. A escolha entre elas é uma decisão de engenharia ou de negócio (quantificar o valor da produção adicional versus o custo da energia), não uma decisão técnica. O trade-off de ~18× em consumo energético para ~2,8× em produção (do extremo mínimo-ET ao extremo máximo-M_CH3OH) caracteriza a curvatura e a amplitude da fronteira — quanto custa, em energia, cada unidade adicional de metanol.
 
-A fronteira de Pareto via surrogate é o resultado operacional central do TCC. A abordagem é metodologicamente defensável em três pontos. Primeiro, o surrogate SVR k*=6 foi validado com três camadas de evidência independentes (equivalência bootstrap, SHAP e Sobol) antes de ser usado como função objetivo — não é uma caixa-preta não calibrada. Segundo, a amostragem LHS garante cobertura uniforme do espaço de busca e é a mesma técnica usada para gerar os dados originais do REF1, mantendo consistência metodológica. Terceiro, a restrição de pureza é imposta pelo mesmo surrogate que a prediz, e não por um threshold arbitrário: o valor 0.98 vem da especificação operacional do processo descrita no REF1.
-
-Contribuição: 6.3 entrega o conjunto de soluções Pareto-ótimas que sintetiza todo o trabalho anterior — o surrogate validado (Etapas 2 e 3), a seleção de features (Etapa 3), a análise de sensibilidade (Etapa 4) e as superfícies de resposta (6.1 e 6.2). É a resposta à pergunta central do TCC: "quais são os pontos de operação ótimos que minimizam energia, maximizam produção e garantem pureza?" O artefato `6.3_pareto_solucoes.csv` é diretamente utilizável por um operador ou sistema de controle — traduz o problema de otimização em uma tabela de recomendações. A sub-etapa 6.4 usa essa tabela para identificar e interpretar os pontos mais relevantes da fronteira.
+Contribuição: 6.3 entrega o conjunto de soluções Pareto-ótimas que sintetiza todo o trabalho anterior — o surrogate validado (Etapas 2 e 3), a seleção de features (Etapa 3), a análise de sensibilidade (Etapa 4) e as superfícies de resposta (6.1 e 6.2). É a resposta à pergunta central: "quais são os pontos de operação ótimos que minimizam energia, maximizam produção e garantem pureza?"
 
 ### 6.4 — Análise de trade-off e narrativa
 
-Objetivo: traduzir o conjunto de 20 soluções Pareto-ótimas de `6.3_pareto_solucoes.csv` em conhecimento operacional interpretável. A sub-etapa não gera novos surrogates nem reavalia modelos — toda a computação é leitura e análise do artefato de 6.3. O resultado é a descrição de três pontos-chave da fronteira (extremo de mínimo ET, extremo de máximo M_CH3OH e região de compromisso) com seus respectivos valores de inputs e saídas, e a identificação de quais inputs discriminam cada região da fronteira.
+Leitura e interpretação das 20 soluções Pareto-ótimas de `6.3_pareto_solucoes.csv`. Nenhum modelo é treinado ou reavaliado — toda a computação é análise do artefato de 6.3.
 
-Premissas: a divisão da fronteira em três regiões é feita por percentis de ET (mínimo, percentis 33–67 como compromisso, máximo), o que é uma escolha de discretização, não um ótimo absoluto. Qualquer ponto da fronteira é igualmente Pareto-ótimo; a seleção de três regiões serve apenas para tornar a análise legível e comunicável. A narrativa assume que os insights de Sobol e SHAP das Etapas 3 e 4 são hipóteses a verificar: se BRC1 e RFF são os inputs de maior efeito aditivo sobre ET, espera-se que eles sejam os que mais variam ao longo da fronteira — e é exatamente isso que 6.4 verifica nos dados reais da fronteira.
+A fronteira é dividida em três regiões por percentis de ET: extremo de mínimo ET, região de compromisso (percentis 33–67) e extremo de máximo M_CH3OH. A divisão em três regiões é uma escolha de discretização para legibilidade narrativa — qualquer ponto da fronteira é igualmente Pareto-ótimo. Para cada região, registram-se os valores dos 6 inputs de S₆ e das 3 saídas preditas, sendo a região de compromisso o "intervalo onde o ganho marginal de produção por unidade de energia ainda é favorável".
 
-O que é avaliado: para cada um dos três pontos-chave, os valores dos 6 inputs de S₆ e as três saídas preditas pelo surrogate. O olhar analítico central é sobre a variação dos inputs ao longo da fronteira: quais inputs mudam muito entre o extremo energético e o extremo de produção (graus de liberdade reais do trade-off) e quais permanecem estreitos (inputs que a restrição de pureza ou a física do processo fixam em valores próximos, independentemente do objetivo energético). A figura `6.4_pareto_anotado.png` marca os três pontos sobre a fronteira gerada em 6.3, tornando visível a posição de cada região no espaço ET × M_CH3OH.
+O foco analítico é sobre quais inputs variam ao longo da fronteira (graus de liberdade reais do trade-off) e quais permanecem estreitos (inputs que a restrição de pureza ou a física do processo fixam independentemente do objetivo). Essa distinção conecta diretamente ao resultado de Sobol e SHAP: se BRC1 e RFF são os inputs de maior efeito aditivo sobre ET, espera-se que sejam os que mais variam entre os extremos da fronteira — e é exatamente isso que 6.4 verifica nos dados reais.
 
-Os resultados confirmam a coerência com as Etapas 3 e 4. BRC1 e RFF são os inputs discriminantes: no extremo de mínimo ET, BRC1=0.57 (valor mínimo da faixa física) e RFF=0.247 (próximo ao máximo de 0.25); no extremo de máximo M_CH3OH, BRC1=9.05 e RFF=0.013. Essa inversão é coerente com os mecanismos físicos identificados pelo Sobol: BRC1 baixo reduz o duty do refervedor da coluna 1, e RFF alto desvia fluxo do loop de reciclo para a purga, diminuindo a carga de separação ao custo da conversão total. Os demais inputs (T1, RRC1, RRC2) permanecem estreitos ao longo de toda a fronteira — confirmam que a fronteira se move essencialmente no subplano (BRC1, RFF), com os outros inputs atuando como ajustes finos para satisfazer a restrição de pureza.
+O artefato `6.4_narrativa.md` documenta a análise em linguagem de processo, sem referências ao surrogate, servindo como insumo direto para a escrita do TCC.
 
-A região de compromisso (ET≈25 kW, M_CH3OH≈10,3 kg/hr) produz aproximadamente 80% da produção máxima com 30% do consumo energético máximo. Este ponto é relevante operacionalmente: concentra a maior parte do valor de produção com uma fração pequena do custo energético. O artefato `6.4_narrativa.md` documenta essa análise em formato narrativo independente do notebook, servindo como insumo direto para a escrita do TCC.
-
-Como justificar para a banca: a coerência entre os inputs que discriminam a fronteira (BRC1 e RFF) e os índices de Sobol de primeira ordem calculados de forma agnóstica na Etapa 4 (S₁(RFF)=0.437 para ET, S₁(BRC1)=0.318) não é coincidência — é uma validação cruzada do pipeline inteiro. O mesmo par de inputs que o método de Sobol identificou como responsável pela maior fração da variância aditiva de ET é o par que, na fronteira Pareto real, determina a posição de cada solução. Essa convergência entre a análise de sensibilidade e a análise de trade-off reforça que o surrogate capturou a física relevante do processo, não apenas ajustou curvas a dados.
-
-Uma possível pergunta da banca é sobre a utilidade prática de uma fronteira gerada por surrogate em comparação com dados simulados. A resposta é que o surrogate permite varrer 50.000 pontos em segundos — o que seria inviável com o simulador Aspen, que exige dezenas de minutos por ponto de operação e frequentemente diverge (como evidenciado pelos 79 erros de convergência no dataset original). O surrogate é uma ferramenta de triagem: identifica candidatos promissores que podem então ser validados pontualmente no simulador, reduzindo drasticamente o custo computacional da exploração.
-
-Contribuição: 6.4 fecha o ciclo narrativo do TCC. O percurso parte dos dados brutos do REF1 (Etapa 0), passa pela construção e validação do surrogate (Etapas 2 e 3), pela análise de sensibilidade (Etapa 4), pela consolidação dos resultados (Etapa 5) e chega na Etapa 6 com a resposta operacional: quais são os pontos de operação que otimizam o processo, o quanto cada grau de liberdade contribui para o trade-off, e qual é a região de compromisso recomendável. O artefato `6.4_narrativa.md` é o único documento da Etapa 6 escrito em linguagem de processo (não de modelo), tornando os resultados acessíveis a um leitor de engenharia química sem necessidade de familiaridade com os detalhes do surrogate.
-
-
-## Interpretação
-
-### 6.1 — Superfícies de resposta: ET e M_CH3OH em função de (BRC1, RFF)
-
-### 6.2 — Superfície de resposta: x_CH3OH em função de (RRC1, BRC1)
-
+`6.4_pareto_anotado.png`: o gráfico da fronteira de Pareto gerado em 6.3 (eixo x = ET, eixo y = M_CH3OH, pontos cinza = viáveis dominados, curva azul = soluções não dominadas) com três marcadores sobrepostos — um em cada região identificada (mínimo-ET, compromisso, máximo-M_CH3OH). Cada marcador é anotado com os valores de ET e M_CH3OH correspondentes, tornando visível onde cada região se situa no espaço de objetivos e qual é a amplitude do trade-off entre os extremos.
