@@ -2,7 +2,7 @@
 
 ## Proposta
 
-O trabalho replica e estende o fluxo metodológico de Sultan et al. (2025) - o artigo é mencionado como "REF1" ao longo deste documento — modelagem substituta de um processo de produção de metanol verde a partir de dados públicos de simulação Aspen (LHS-2000). Cinco arquiteturas de surrogate (SVR, DT, RF, XGBoost, ANN) são treinadas sobre 8 variáveis de processo para prever três saídas (consumo de energia ET, vazão de metanol M_CH3OH, pureza x_CH3OH). A partir dos modelos baseline, aplica-se análise de importância via SHAP para identificar e descartar features irrelevantes, produzindo modelos reduzidos com k ∈ {4, 5, 6} inputs. A seleção final (k*=6, arquitetura SVR) é validada por equivalência estatística (bootstrap IC 95%) e por análise de sensibilidade global independente (Sobol). A etapa final explora a fronteira de Pareto do problema bi-objetivo (minimizar ET, maximizar M_CH3OH) com restrição de pureza ≥ 0.98, usando o surrogate selecionado como substituto computacional do simulador.
+O trabalho replica e estende o fluxo metodológico de Sultan et al. (2025) - o artigo é mencionado como "REF1" ao longo deste documento — modelagem substituta de um processo de produção de metanol verde a partir de dados públicos de simulação Aspen (LHS-2000). Cinco arquiteturas de surrogate (SVR, DT, RF, XGBoost, ANN) são treinadas sobre 8 variáveis de processo para prever três saídas (consumo de energia ET, vazão de metanol M_CH3OH, pureza x_CH3OH). A partir dos modelos baseline, aplica-se análise de importância via SHAP para identificar e descartar features irrelevantes, produzindo modelos reduzidos com k ∈ {4, 5, 6} inputs. A seleção final (k*=6, arquitetura SVR) é validada por equivalência estatística (bootstrap IC 95%) e por análise de sensibilidade global independente (Sobol). A etapa final explora a fronteira de Pareto do problema bi-objetivo (minimizar ET, maximizar M_CH3OH) com restrição de pureza ≥ 0.99, usando o surrogate selecionado como substituto computacional do simulador.
 
 ## Sistema físico de referência
 
@@ -18,11 +18,13 @@ Os produtos do reator são resfriados a 30 °C. A fração gasosa não convertid
 
 As variáveis de operação que definem o ponto de operação da planta — e que constituem os 8 inputs dos surrogates — são: temperatura do reator (T₁), pressão do reator (P₁), temperatura de entrada na coluna de destilação (T₂), razões de refluxo e boil-up das duas colunas (RRC1, BRC1, RRC2, BRC2) e fração de purga da corrente de reciclo (RFF). As três saídas de interesse são a vazão mássica de metanol (M_CH₃OH), a pureza do produto (x_CH₃OH) e o consumo total de energia da planta (E_T).
 
+A vazão de alimentação (CO₂ e H₂) não é variável de entrada: é mantida fixa no modelo Aspen em um caso base. A variabilidade observada em M_CH₃OH no dataset resulta das condições operacionais — temperatura, pressão, reciclagem e separação — que alteram a conversão no reator e a eficiência das colunas, modificando a quantidade de metanol que chega ao produto final. As especificações quantitativas completas do feed (vazões absolutas) constam nas Tabelas S4–S5 do material suplementar do REF1, não disponíveis no repositório público. A Tabela 2 do artigo, usada para validação do modelo do reator, indica a ordem de grandeza do processo: saída do reator com CH₃OH ≈ 11.283 kg/hr, CO₂ ≈ 18.316 kg/hr e H₂ ≈ 8.013 kg/hr (referência industrial de Chen et al., 2011).
+
 Foi criado um "dicionário de variáveis" - DICT_VARIAVEIS.md - para consulta, que mostra a relação dos códigos/nomes das entradas/saídas.
 
 ## Resultados
 
-Os 15 surrogates baseline foram treinados e comparados com o REF1 — SVR e ANN alcançaram melhor desempenho geral (R² > 0.95 nos três outputs). A análise SHAP sobre os 5 modelos identificou P1 (pressão do reator) e T2 (temperatura de entrada na coluna) como features consensualmente irrelevantes em todos os modelos e outputs. Os modelos reduzidos com k=6 mantiveram R² equivalente ao baseline (equivalência verificada para SVR, RF e DT; XGBoost e ANN falharam em um output cada). SVR k=6 foi selecionado por ser o único com equivalência simultânea nos 3 outputs e maior R² médio. A análise de Sobol confirmou o descarte de P1 e T2 (S_T < 0.014 em todos os outputs) e a concordância com os rankings SHAP (ρ de Spearman médio = 0.919, sem divergências de |Δrank| ≥ 3). A fronteira de Pareto foi gerada via varredura LHS de 50.000 pontos, resultando em 20 soluções não dominadas com trade-off de aproximadamente 18× em ET para 2,8× em M_CH3OH entre os extremos da fronteira.
+Os 15 surrogates baseline foram treinados e comparados com o REF1 — SVR e ANN alcançaram melhor desempenho geral (R² > 0.95 nos três outputs). A análise SHAP sobre os 5 modelos identificou P1 (pressão do reator) e T2 (temperatura de entrada na coluna) como features consensualmente irrelevantes em todos os modelos e outputs. Os modelos reduzidos com k=6 mantiveram R² equivalente ao baseline (equivalência verificada para SVR, RF e DT; XGBoost e ANN falharam em um output cada). SVR k=6 foi selecionado por ser o único com equivalência simultânea nos 3 outputs e maior R² médio. A análise de Sobol confirmou o descarte de P1 e T2 (S_T < 0.014 em todos os outputs) e a concordância com os rankings SHAP (ρ de Spearman médio = 0.919, sem divergências de |Δrank| ≥ 3). A fronteira de Pareto foi gerada via varredura LHS de 50.000 pontos, resultando em 23 soluções não dominadas com trade-off de aproximadamente 18× em ET para 2,8× em M_CH3OH entre os extremos da fronteira.
 
 ---
 
@@ -741,22 +743,22 @@ As três camadas convergem: P1 e T2 têm contribuição desprezível por qualque
 
 ## Descrição
 
-Com o surrogate SVR k*=6 validado e a sensibilidade global caracterizada, esta etapa explora a fronteira de Pareto do problema bi-objetivo (minimizar ET, maximizar M_CH3OH) com restrição operacional de pureza x_CH3OH ≥ 0.98. O percurso parte da visualização geométrica do landscape de otimização — superfícies de resposta sobre os subplanos (BRC1, RFF) e (RRC1, BRC1) do espaço S₆ — avança para a geração formal da fronteira via varredura LHS de 50.000 pontos sobre o espaço completo de S₆, e encerra com a análise dos três pontos-chave da fronteira (extremos e região de compromisso) em linguagem de processo. O surrogate substitui o simulador Aspen como função de avaliação, tornando viável a exploração de dezenas de milhares de pontos de operação em segundos.
+Com o surrogate SVR k*=6 validado e a sensibilidade global caracterizada, esta etapa explora a fronteira de Pareto do problema bi-objetivo (minimizar ET, maximizar M_CH3OH) com restrição operacional de pureza x_CH3OH ≥ 0.99. O percurso parte da visualização geométrica do landscape de otimização — superfícies de resposta sobre os subplanos (BRC1, RFF) e (RRC1, BRC1) do espaço S₆ — avança para a geração formal da fronteira via varredura LHS de 50.000 pontos sobre o espaço completo de S₆, e encerra com a análise dos três pontos-chave da fronteira (extremos e região de compromisso) em linguagem de processo. O surrogate substitui o simulador Aspen como função de avaliação, tornando viável a exploração de dezenas de milhares de pontos de operação em segundos.
 
 ## Sub-etapas
 
 - 6.1 — Superfícies de resposta de ET e M_CH3OH em função de (BRC1, RFF): mapeamento visual do comportamento do surrogate SVR k*=6 sobre o subplano dos dois inputs de maior efeito aditivo sobre ET (S₁=0.437 e 0.318, Sobol 4.1), com os demais inputs fixados na média das faixas físicas; overlay dos 193 pontos do test set nos mapas de contorno como diagnóstico de suporte empírico
 - 6.2 — Superfície de resposta de x_CH3OH em função de (RRC1, BRC1): análise equivalente para o output de pureza, sobre o par de inputs de maior importância global para x_CH3OH (RRC1 rank 1, BRC1 rank 2 em SHAP e Sobol)
-- 6.3 — Fronteira de Pareto ET × M_CH3OH: geração formal via varrimento LHS de 50.000 pontos sobre S₆; filtragem por viabilidade (x_CH3OH ≥ 0.98, 63,5% do espaço); identificação das 20 soluções não dominadas por dominância de Pareto clássica; salvamento dos pontos candidatos em `6.3_pareto_solucoes.csv`
-- 6.4 — Análise de trade-off e narrativa: tradução das soluções Pareto-ótimas em conhecimento operacional; identificação dos inputs discriminantes (BRC1 e RFF) e dos inputs estreitos (T1, RRC1, RRC2); caracterização da amplitude do trade-off (~18× em ET para ~2,8× em M_CH3OH); verificação de coerência com os índices Sobol e SHAP das Etapas 3 e 4
+- 6.3 — Fronteira de Pareto ET × M_CH3OH: geração formal via varrimento LHS de 50.000 pontos sobre S₆; filtragem por viabilidade (x_CH3OH ≥ 0.99, 63,5% do espaço); identificação das 23 soluções não dominadas por dominância de Pareto clássica; salvamento dos pontos candidatos em `6.3_pareto_solucoes.csv`
+- 6.4 — Otimização econômica sobre a fronteira de Pareto: cálculo do lucro operacional horário para cada ponto Pareto-ótimo via função lucro = M_CH3OH × P_M − ET × P_E; varredura de α = P_E/P_M ∈ [0.05, 0.60] para mapear o deslocamento do ótimo; análise de três cenários fixos (α baixo/médio/alto); entrega de mapa de decisão operacional com suporte quantitativo
 
 ## Definições
 
 - D-E6-01: Surrogate SVR k*=6 usado como função de avaliação em todas as sub-etapas — mesmo modelo selecionado em 3.5 e validado nas Etapas 3–4; não há novos modelos treinados
 - D-E6-02: Ceteris paribus em 6.1 e 6.2 — inputs não variados fixados na média das faixas físicas normalizadas; limitação explícita resolvida em 6.3 com varredura completa
 - D-E6-03: Varredura LHS em 6.3 — 50.000 pontos quasi-uniformes sobre S₆; não é otimização iterativa, mas cobertura discreta da fronteira contínua
-- D-E6-04: Restrição de pureza x_CH3OH ≥ 0.98 — especificação operacional do REF1; avaliada pelo surrogate SVR k*=6 treinado para x_CH3OH
-- D-E6-05: Fronteira de Pareto com 20 soluções não dominadas — discretização por varrimento; resolução depende da densidade amostral (50.000 pontos)
+- D-E6-04: Restrição de pureza x_CH3OH ≥ 0.99 — especificação operacional do REF1; avaliada pelo surrogate SVR k*=6 treinado para x_CH3OH
+- D-E6-05: Fronteira de Pareto com 23 soluções não dominadas — discretização por varrimento; resolução depende da densidade amostral (50.000 pontos)
 - D-E6-06: Três regiões da fronteira (mínimo-ET, compromisso, máximo-M_CH3OH) definidas por percentis de ET — escolha de discretização para legibilidade narrativa, não ótimos absolutos
 
 ## Artefatos
@@ -776,9 +778,10 @@ Com o surrogate SVR k*=6 validado e a sensibilidade global caracterizada, esta e
     - `6.3_pareto_ET_M.png`
     - `6.3_pareto_solucoes.csv`
 - 6.4
-    - `6.4_analise_tradeoff.ipynb`
-    - `6.4_pareto_anotado.png`
-    - `6.4_narrativa.md`
+    - `6.4_otimizacao_economica.ipynb`
+    - `6.4_pareto_economico.png`
+    - `6.4_mapa_alpha.png`
+    - `6.4_tabela_cenarios.csv`
 
 ## Descrição sub-etapas
 
@@ -798,26 +801,38 @@ A mesma implementação foi feita para 6.2 (M_CH3OH), mas com variáveis de entr
 
 ### 6.3 — Fronteira de Pareto ET × M_CH3OH
 
-Objetivo: gerar formalmente a fronteira de Pareto do problema bi-objetivo (minimizar ET, maximizar M_CH3OH) sobre o espaço completo S₆ = {T1, RRC1, BRC1, RRC2, BRC2, RFF}, impondo a restrição operacional x_CH3OH ≥ 0.98. Esta é a sub-etapa central da Etapa 6: enquanto 6.1 e 6.2 exploram visualmente subplanos do espaço de busca, 6.3 varre o espaço completo e identifica as soluções que são ótimas no sentido de Pareto — aquelas para as quais não existe nenhum outro ponto do espaço viável que melhore um objetivo sem degradar o outro.
+Objetivo: gerar formalmente a fronteira de Pareto do problema bi-objetivo (minimizar ET, maximizar M_CH3OH) sobre o espaço completo S₆ = {T1, RRC1, BRC1, RRC2, BRC2, RFF}, impondo a restrição operacional x_CH3OH ≥ 0.99. Esta é a sub-etapa central da Etapa 6: enquanto 6.1 e 6.2 exploram visualmente subplanos do espaço de busca, 6.3 varre o espaço completo e identifica as soluções que são ótimas no sentido de Pareto — aquelas para as quais não existe nenhum outro ponto do espaço viável que melhore um objetivo sem degradar o outro.
 
 Premissas: o surrogate SVR k*=6 é suficientemente fiel ao processo real para que as predições no espaço amostrado sejam interpretáveis como o comportamento do sistema — premissa validada empiricamente nas Etapas 3 (equivalência estatística) e 4 (consistência Sobol × SHAP). A amostragem LHS de 50.000 pontos sobre as faixas físicas de S₆ não é uma otimização iterativa: é uma cobertura quasi-uniforme do espaço de busca que gera uma aproximação discreta da fronteira contínua. A qualidade dessa aproximação depende da densidade amostral e da suavidade do surrogate, não de convergência de um algoritmo de gradiente. O algoritmo de varrimento por dominância identifica, dentro do conjunto de pontos viáveis, aqueles para os quais nenhum outro ponto viável apresenta simultaneamente ET menor e M_CH3OH maior — definição clássica de dominância de Pareto.
 
-A restrição x_CH3OH ≥ 0.98 é avaliada diretamente pelo surrogate SVR k*=6 treinado para x_CH3OH — o mesmo modelo validado nas Etapas 3 e 4. A taxa de viabilidade resultante (63,5%, ou 31.745 de 50.000 pontos) indica que a restrição de pureza é genuinamente restritiva: ela elimina aproximadamente um terço do espaço de busca, concentrando a fronteira de Pareto em regiões onde as condições operacionais são suficientemente seletivas para garantir pureza.
+A restrição x_CH3OH ≥ 0.99 é avaliada diretamente pelo surrogate SVR k*=6 treinado para x_CH3OH — o mesmo modelo validado nas Etapas 3 e 4. A taxa de viabilidade resultante (63,5%, ou 31.745 de 50.000 pontos) indica que a restrição de pureza é genuinamente restritiva: ela elimina aproximadamente um terço do espaço de busca, concentrando a fronteira de Pareto em regiões onde as condições operacionais são suficientemente seletivas para garantir pureza.
 
-O que é avaliado: a existência, forma e extensão da fronteira de Pareto no espaço ET × M_CH3OH, sob restrição de pureza. A figura `6.3_pareto_ET_M.png` permite ler diretamente quais combinações (ET, M_CH3OH) são Pareto-ótimas e quais são dominadas — o conjunto cinza (viáveis dominados) e a curva azul (Pareto-eficientes) contam a história completa do espaço de soluções. As 20 soluções não dominadas salvas em `6.3_pareto_solucoes.csv` são o artefato operacional: cada linha é um ponto de operação candidato, com os 6 inputs e as 3 saídas previstas pelo surrogate.
+O que é avaliado: a existência, forma e extensão da fronteira de Pareto no espaço ET × M_CH3OH, sob restrição de pureza. A figura `6.3_pareto_ET_M.png` permite ler diretamente quais combinações (ET, M_CH3OH) são Pareto-ótimas e quais são dominadas — o conjunto cinza (viáveis dominados) e a curva azul (Pareto-eficientes) contam a história completa do espaço de soluções. As 23 soluções não dominadas salvas em `6.3_pareto_solucoes.csv` são o artefato operacional: cada linha é um ponto de operação candidato, com os 6 inputs e as 3 saídas previstas pelo surrogate.
 
 A fronteira não é uma solução única — é um conjunto de soluções igualmente defensáveis do ponto de vista da otimização. A escolha entre elas é uma decisão de engenharia ou de negócio (quantificar o valor da produção adicional versus o custo da energia), não uma decisão técnica. O trade-off de ~18× em consumo energético para ~2,8× em produção (do extremo mínimo-ET ao extremo máximo-M_CH3OH) caracteriza a curvatura e a amplitude da fronteira — quanto custa, em energia, cada unidade adicional de metanol.
 
 Contribuição: 6.3 entrega o conjunto de soluções Pareto-ótimas que sintetiza todo o trabalho anterior — o surrogate validado (Etapas 2 e 3), a seleção de features (Etapa 3), a análise de sensibilidade (Etapa 4) e as superfícies de resposta (6.1 e 6.2). É a resposta à pergunta central: "quais são os pontos de operação ótimos que minimizam energia, maximizam produção e garantem pureza?"
 
-### 6.4 — Análise de trade-off e narrativa
+### 6.4 — Otimização econômica sobre a fronteira de Pareto
 
-Leitura e interpretação das 20 soluções Pareto-ótimas de `6.3_pareto_solucoes.csv`. Nenhum modelo é treinado ou reavaliado — toda a computação é análise do artefato de 6.3.
+Para cada ponto Pareto-ótimo gerado em 6.3, calcula-se o lucro operacional horário:
 
-A fronteira é dividida em três regiões por percentis de ET: extremo de mínimo ET, região de compromisso (percentis 33–67) e extremo de máximo M_CH3OH. A divisão em três regiões é uma escolha de discretização para legibilidade narrativa — qualquer ponto da fronteira é igualmente Pareto-ótimo. Para cada região, registram-se os valores dos 6 inputs de S₆ e das 3 saídas preditas, sendo a região de compromisso o "intervalo onde o ganho marginal de produção por unidade de energia ainda é favorável".
+    lucro(i) = M_CH3OH(i) × P_M − ET(i) × P_E  [USD/hr]
 
-O foco analítico é sobre quais inputs variam ao longo da fronteira (graus de liberdade reais do trade-off) e quais permanecem estreitos (inputs que a restrição de pureza ou a física do processo fixam independentemente do objetivo). Essa distinção conecta diretamente ao resultado de Sobol e SHAP: se BRC1 e RFF são os inputs de maior efeito aditivo sobre ET, espera-se que sejam os que mais variam entre os extremos da fronteira — e é exatamente isso que 6.4 verifica nos dados reais.
+com P_M = 0,40 USD/kg (Methanex NA posted price, 2024) e P_E variável. A análise cobre três cenários fixos — α baixo (P_E=0,05 USD/kWh), médio (0,10) e alto (0,15) — mais uma varredura contínua α ∈ [0,05; 0,60] com 1000 pontos.
 
-O artefato `6.4_narrativa.md` documenta a análise em linguagem de processo, sem referências ao surrogate, servindo como insumo direto para a escrita do TCC.
+A razão de preços α = P_E/P_M (kg/kWh) determina a taxa marginal de substituição (TMS) mínima que justifica aceitar mais energia em troca de mais metanol. A fronteira empírica tem TMS ∈ [0,0015; 6,21]; todos os cenários analisados (α ∈ [0,125; 0,375]) caem dentro dessa faixa, resultando em ótimos intermediários — não nos extremos da fronteira.
 
-`6.4_pareto_anotado.png`: o gráfico da fronteira de Pareto gerado em 6.3 (eixo x = ET, eixo y = M_CH3OH, pontos cinza = viáveis dominados, curva azul = soluções não dominadas) com três marcadores sobrepostos — um em cada região identificada (mínimo-ET, compromisso, máximo-M_CH3OH). Cada marcador é anotado com os valores de ET e M_CH3OH correspondentes, tornando visível onde cada região se situa no espaço de objetivos e qual é a amplitude do trade-off entre os extremos.
+Resultados dos três cenários (sobre as 23 soluções Pareto-ótimas):
+
+| Cenário | α | Ponto (idx) | ET (kW) | M_CH3OH (kg/hr) | Lucro (USD/hr) |
+|---------|---|-------------|---------|-----------------|----------------|
+| baixo | 0,125 | 15 | 27.741 | 10.996 | 3.011 |
+| médio | 0,250 | 8 | 14.549 | 8.614 | 1.991 |
+| alto | 0,375 | 8 | 14.549 | 8.614 | 1.263 |
+
+O ponto ótimo para α baixo (idx=15, M=10.996 kg/hr) confirma a tendência de maximizar produção quando energia é barata. Para α médio e alto, o mesmo ponto (idx=8, ET=14.549 kW) é ótimo — reflexo da não-convexidade da fronteira: há um "vale" de TMS entre os pontos 8→9 (TMS=0,188) que faz o ganho marginal de produção deixar de compensar o custo energético para α ≥ 0,188. O mapa de α ilustra esse comportamento: o índice ótimo cai de ~22 para ~8 monotonicamente conforme α cresce de 0,05 a ~0,19, e estabiliza no ponto 8 para α maior.
+
+`6.4_pareto_economico.png`: fronteira de Pareto com os três pontos ótimos marcados por estrelas coloridas (verde/laranja/vermelho para α baixo/médio/alto) e overlay de três curvas de iso-lucro (M = α × ET + c) para α médio, evidenciando geometricamente a tangência no ponto ótimo.
+
+`6.4_mapa_alpha.png`: índice do ponto Pareto ótimo em função de α — leitura direta de "dado o contexto econômico, qual ponto operar".
